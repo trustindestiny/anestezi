@@ -1181,6 +1181,14 @@ body:not(.cloud-ready)>header,body:not(.cloud-ready)>.shell,body:not(.cloud-read
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Rotasyon Merkezi">
+
+<style id="print-zoom-controls-v1">
+.print-zoom-tools{display:inline-flex!important;align-items:center;gap:3px;margin-left:5px;vertical-align:middle}
+.print-zoom-tools button{display:inline-flex!important;align-items:center;justify-content:center;min-width:27px;height:28px;padding:0 6px!important;border:1px solid #cbd7e5!important;border-radius:6px!important;background:#f7f9fc!important;color:#244b73!important;font-size:12px!important;font-weight:800!important;cursor:pointer}
+.print-zoom-tools .print-zoom-value{min-width:42px;text-align:center;font-size:10px;font-weight:800;color:#52657c}
+@media(max-width:580px){.print-zoom-tools{gap:2px;margin-left:3px}.print-zoom-tools button{min-width:25px;height:27px}}
+@media print{.print-zoom-tools{display:none!important}}
+</style>
 </head><body>
 <div id="cloudAuthGate" aria-live="polite">
  <div class="cloud-auth-card">
@@ -2392,6 +2400,58 @@ function restore(e){let f=e.target.files[0];if(!f)return;let rd=new FileReader()
  },true);
  document.addEventListener("scroll",()=>{if(currentCell)position(currentCell)},true);
  window.addEventListener("resize",()=>{if(currentCell)position(currentCell)});
+})();
+
+
+/* Yazdırma alanı ölçek kontrolleri: her rapor kendi ölçeğini bağımsız tutar. */
+(()=>{
+ const scales=new Map();
+ const clamp=value=>Math.max(10,Math.min(200,Math.round(value/10)*10));
+ const keyFor=button=>{
+  if(button.closest("#modal")){
+   const action=button.getAttribute("onclick")||"";
+   if(action.includes("printRotationHistoryRange"))return "rotation-history";
+   if(action.includes("printModalReport"))return "modal-report";
+   return "modal-report";
+  }
+  const page=button.closest(".page");
+  return page?.id||"page-dashboard";
+ };
+ const targetFor=key=>{
+  if(key==="modal-report")return document.getElementById("modalBody");
+  if(key==="rotation-history")return document.getElementById("rotationHistoryResults")||document.getElementById("page-dashboard");
+  return document.getElementById(key);
+ };
+ const apply=key=>{
+  const value=scales.get(key)||100,target=targetFor(key);
+  if(target){target.style.zoom=String(value/100);target.dataset.printZoom=String(value);}
+  document.querySelectorAll('.print-zoom-tools[data-zoom-key="'+key+'"] .print-zoom-value').forEach(el=>el.textContent=value+"%");
+ };
+ const addControls=button=>{
+  if(!button||button.dataset.zoomControlsAdded==="1")return;
+  const label=(button.innerText||button.textContent||"").trim();
+  const action=button.getAttribute("onclick")||"";
+  if(!/yazdır/i.test(label)&&!/print/i.test(action))return;
+  if(button.closest(".print-zoom-tools"))return;
+  const key=keyFor(button);
+  button.dataset.zoomControlsAdded="1";
+  const tools=document.createElement("span");
+  tools.className="print-zoom-tools noprint";
+  tools.dataset.zoomKey=key;
+  tools.innerHTML='<button type="button" aria-label="Yazdırılacak alanı küçült" title="Küçült">A−</button><span class="print-zoom-value">100%</span><button type="button" aria-label="Yazdırılacak alanı büyüt" title="Büyüt">A+</button>';
+  const minus=tools.children[0],plus=tools.children[2];
+  minus.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const next=clamp((scales.get(key)||100)-10);scales.set(key,next);apply(key);});
+  plus.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const next=clamp((scales.get(key)||100)+10);scales.set(key,next);apply(key);});
+  button.insertAdjacentElement("afterend",tools);
+  apply(key);
+ };
+ const scan=root=>{
+  if(root.matches?.("button"))addControls(root);
+  root.querySelectorAll?.("button").forEach(addControls);
+ };
+ scan(document);
+ new MutationObserver(records=>records.forEach(record=>record.addedNodes.forEach(node=>{if(node.nodeType===1)scan(node);}))).observe(document.body,{childList:true,subtree:true});
+ window.getPrintZoom=valueKey=>(scales.get(valueKey)||100)/100;
 })();
 
 render();
