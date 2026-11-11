@@ -1998,3 +1998,495 @@ function rotationDatesModal(pid,rotation){
  const yearInput=(id)=>`<input id="${id}" type="number" min="2020" max="2100" value="${new Date().getFullYear()}">`;
  openModal(`${esc(p.name)} · ${esc(rotation)}`,`<div class="rotation-date-popup-list">${rows||'<div class="empty">Kayıt yok.</div>'}</div><hr><h3>Yeni gerçekleşmiş dönem ekle</h3><p class="muted">İlk ay zorunludur. İkinci ay isteğe bağlıdır. Aylar ayrı ayrı silinebilir; bir ayı silmek diğer ayı silmez.</p><div class="formgrid rotation-period-fields"><div class="field"><label>İlk ay <span class="required">*</span></label>${monthOptions("dashAddMonth")}</div><div class="field"><label>İkinci ay (isteğe bağlı)</label>${monthOptions("dashAddMonth2",true)}</div><div class="field rotation-year-field"><label>Yıl <span class="required">*</span></label>${yearInput("dashAddYear")}</div>${rotation==="Yoğun Bakım"?'<div class="field full"><label>Yoğun Bakım Katı</label><select id="dashAddFloor"><option value="">Kat seçin</option><option value="2. Kat">2. Kat</option><option value="7. Kat">7. Kat</option></select></div>':""}</div>`,`<button class="btn" onclick="closeModal()">Kapat</button><button class="btn primary" data-rotation="${esc(rotation)}" onclick="addDashboardRotation('${pid}',this.dataset.rotation)">Dönemi ekle</button>`);
 }
+function deleteDashboardRotationMonth(pid,rid,year,month){
+ const rec=(db.rotationRecords||[]).find(r=>r.personId===pid&&String(r.id||"")===String(rid));if(!rec||Number(rec.year)!==Number(year))return;
+ if(!confirm(`${MONTHS[month-1]} ${year} kaydı silinsin mi? Diğer aylar korunacaktır.`))return;
+ rec.months=rotationRecordMonthList(rec).filter(x=>x!==Number(month));
+ if(Array.isArray(rec.monthDetails))rec.monthDetails=rec.monthDetails.filter(item=>Number(item.month)!==Number(month));
+ db.rotationRecords=db.rotationRecords.flatMap(item=>item===rec?splitRotationRecordIntoConsecutivePeriods(item):[item]).filter(item=>item.undated||rotationRecordMonthList(item).length>0);
+ persist("Dashboard'da yalnızca seçilen rotasyon ayı silindi; kalan dönemler korundu");
+ rotationDatesModal(pid,rec.rotation);
+}
+
+function deleteDashboardRotationEntry(pid,rid){
+ const index=(db.rotationRecords||[]).findIndex(r=>r.personId===pid&&String(r.id||"")===String(rid));if(index<0)return;
+ if(!confirm("Bu rotasyon dönemi ve ona bağlı bütün aylar silinsin mi?"))return;
+ const rotation=db.rotationRecords[index].rotation;
+ db.rotationRecords.splice(index,1);
+ persist("Dashboard üzerinden rotasyon dönemi silindi");
+ rotationDatesModal(pid,rotation);
+}
+
+function addDashboardRotation(pid,rotation){
+ const month=Number(document.getElementById("dashAddMonth").value),year=Number(document.getElementById("dashAddYear").value);
+ const secondMonthValue=document.getElementById("dashAddMonth2").value;
+ const secondMonth=secondMonthValue===""?null:Number(secondMonthValue);
+ const person=db.people.find(p=>p.id===pid);
+ if(!person||!Number.isInteger(month)||month<1||month>12||!Number.isInteger(year)||year<2020||year>2100)return alert("İlk ay ve yıl zorunludur. Tarih bilgilerini kontrol edin.");
+ if(secondMonth!==null&&(!Number.isInteger(secondMonth)||secondMonth<1||secondMonth>12))return alert("İkinci ayı kontrol edin.");
+ if(secondMonth!==null&&secondMonth===month)return alert("İlk ve ikinci ay aynı olamaz.");
+ const selectedMonths=[month,...(secondMonth!==null?[secondMonth]:[])].sort((a,b)=>a-b);
+ if(selectedMonths.length===2&&selectedMonths[1]!==selectedMonths[0]+1)return alert("Tek rotasyon dönemi olarak kaydedilecek aylar ardışık olmalıdır. Aralarında boşluk olan ayları ayrı dönemler olarak ekleyin.");
+ const duplicate=selectedMonths.some(x=>findRotationRecordForMonth(pid,rotation,year,x));
+ if(duplicate)return alert("Seçtiğiniz aylardan biri için aynı rotasyon kaydı zaten mevcut.");
+ const floor=rotation==="Yoğun Bakım"?(document.getElementById("dashAddFloor")?.value||""):"";
+ const added=addOrExtendRotationPeriod(pid,rotation,year,selectedMonths,floor,"","Dashboard üzerinden eklendi","dashboard");
+ if(!added)return alert("Seçilen aylardan biri için aynı rotasyon kaydı zaten mevcut.");
+ persist("Dashboard üzerinden gerçekleşmiş rotasyon dönemi eklendi veya mevcut dönem genişletildi");closeModal();rotationDatesModal(pid,rotation);
+}
+
+function completed(p,r){return rotationEntries(p,r).reduce((n,e)=>n+e.credit,0)}
+function rotationEntryLabel(entry){
+ if(entry.undated)return "Tarihsiz dönem";
+ const first=entry.records[0],last=entry.records[entry.records.length-1];
+ const start=MONTHS[entry.startMonth-1],end=MONTHS[entry.endMonth-1];
+ const actualMonths=Array.from(new Set(entry.records.flatMap(rec=>rotationRecordMonthList(rec)))).sort((a,b)=>a-b);
+ const contiguous=actualMonths.every((month,index)=>index===0||month===actualMonths[index-1]+1);
+ const date=actualMonths.length>1&&!contiguous?actualMonths.map(month=>`${MONTHS[month-1]} ${entry.startYear}`).join(" · "):entry.endMonth!==entry.startMonth?`${start} ${entry.startYear} · ${end} ${entry.endYear}`:`${start} ${entry.startYear}`;
+ const floors=[...new Set(entry.records.flatMap(x=>Array.isArray(x.monthDetails)?x.monthDetails.map(detail=>detail.floor):[x.floor]).filter(Boolean))];
+ return `${date}${floors.length? " · "+floors.join(" / "):""}`;
+}
+let remainingViewMode="remaining";
+function setRemainingView(mode){
+ remainingViewMode=mode==="all"?"all":"remaining";
+ document.querySelectorAll(".remaining-tab").forEach(btn=>btn.classList.toggle("active",btn.dataset.mode===remainingViewMode));
+ renderRemaining();
+}
+function buildProgressGroups(p,mode="all"){
+ return GROUPS.map(group=>{
+  const cards=group.items.map(r=>{
+   const target=Number(p.targetOverrides?.[r]??db.targets[r]??6);
+   const ordered=rotationEntries(p,r),done=completed(p,r);
+   const slots=Math.max(0,Math.ceil(target),ordered.length);
+   if(mode==="remaining" && target>0 && done>=target) return "";
+   const rows=Array.from({length:slots},(_,i)=>{
+    const entry=ordered[i];
+    const label=entry?rotationEntryLabel(entry):"";
+    return `<li class="${entry?"completed":"pending"}"><span class="period-index">${i+1}.</span>${entry?`<span>${esc(label)}</span>`:""}</li>`;
+   }).filter(Boolean).join("");
+   const segments=Array.from({length:Math.max(0,Math.ceil(target))},(_,i)=>`<span class="segment ${i<done?"filled":""}"></span>`).join("");
+   if(mode==="remaining" && !rows) return "";
+   return `<section class="progress-item ${done>=target&&target>0?"done":""}"><div class="progress-item-head"><h4>${esc(rotationDisplayName(r))} <span class="progress-ratio-inline">${done.toLocaleString("tr-TR")} / ${target.toLocaleString("tr-TR")}</span></h4></div><div class="progress-segments">${segments}</div><ol class="period-list">${rows||"<li class='pending'><span class='period-index'>—</span></li>"}</ol></section>`;
+  }).join("");
+  if(mode==="remaining" && !cards.trim()) return "";
+  return `<section class="progress-group"><div class="progress-group-heading">${esc(group.name)}</div><div class="progress-group-items">${cards}</div></section>`;
+ }).join("");
+}
+function printDashboardReport(){
+ const dashboard=document.getElementById("page-dashboard");
+ if(!dashboard){alert("Ana sayfa bulunamadı.");return;}
+ const content=dashboard.cloneNode(true);
+ // Rotasyon hücrelerinin mevcut ilerleme, kalan dönem ve tarih bilgileri aynen yazdırılır.
+ content.querySelectorAll(".noprint,button,input,select,textarea").forEach(el=>el.remove());
+ content.querySelectorAll("[onclick],[onkeydown],[role='button'],[tabindex]").forEach(el=>{
+  el.removeAttribute("onclick");el.removeAttribute("onkeydown");el.removeAttribute("role");el.removeAttribute("tabindex");
+ });
+ const old=document.getElementById("printReport");if(old)old.remove();
+ const report=document.createElement("section");
+ report.id="printReport";
+ report.className="dashboard-print";
+ report.innerHTML=`<header class="print-report-header"><div class="print-report-brand">ANESTEZİ VE REANİMASYON</div><h1>Asistan Rotasyon Matrisi</h1><div class="print-report-date">Rapor tarihi: ${new Date().toLocaleDateString("tr-TR")}</div></header><main class="print-report-content"></main><footer class="print-report-footer">Medipol Mega Üniversite Hastanesi · Rotasyon Takip Merkezi</footer>`;
+ report.querySelector(".print-report-content").appendChild(content);
+ document.body.appendChild(report);
+ const cleanup=()=>{if(report.isConnected)report.remove();window.removeEventListener("afterprint",cleanup);};
+ window.addEventListener("afterprint",cleanup);
+ try{
+  window.focus();
+  window.print();
+ }catch(err){
+  cleanup();
+  alert("Yazdırma penceresi açılamadı. Tarayıcı yazdırma izinlerini kontrol edin.");
+ }
+ setTimeout(cleanup,60000);
+}
+function printPageReport(pageName,title,orientation="portrait"){
+ const source=document.getElementById("page-"+pageName);if(!source)return;
+ const content=source.cloneNode(true);
+ content.querySelectorAll(".noprint,button,input,select,textarea").forEach(el=>el.remove());
+ const old=document.getElementById("printReport");if(old)old.remove();
+ const report=document.createElement("section");report.id="printReport";
+ report.innerHTML=`<header class="print-report-header"><div class="print-report-brand">ANESTEZİ VE REANİMASYON</div><h1>${esc(title)}</h1><div class="print-report-date">Rapor tarihi: ${new Date().toLocaleDateString("tr-TR")}</div></header><main class="print-report-content"></main><footer class="print-report-footer">Medipol Mega Üniversite Hastanesi · Rotasyon Takip Merkezi</footer>`;
+ report.querySelector(".print-report-content").appendChild(content);
+ const pageStyle=document.createElement("style");pageStyle.id="modalPrintPageStyle";pageStyle.textContent=`@media print{@page{size:A4 ${orientation==="landscape"?"landscape":"portrait"};margin:12mm}}`;
+ document.head.appendChild(pageStyle);document.body.appendChild(report);
+ const cleanup=()=>{if(report.isConnected)report.remove();if(pageStyle.isConnected)pageStyle.remove();window.removeEventListener("afterprint",cleanup);};
+ window.addEventListener("afterprint",cleanup);window.focus();window.print();setTimeout(cleanup,60000);
+}
+function printModalReport(title,orientation="portrait",personName="",fitOnePage=false,startDate=""){
+ const modalBody=document.getElementById("modalBody");if(!modalBody)return;
+ const content=modalBody.cloneNode(true);
+ content.querySelectorAll("button,.noprint,#assistantProgressTabs").forEach(el=>el.remove());
+ if(title.includes("Kronolojik Rotasyon Geçmişi")){
+  const entries=[...content.querySelectorAll(".historyitem")];
+  const list=document.createElement("ol");list.className="print-history-list";
+  entries.forEach(entry=>{
+   const li=document.createElement("li"),detail=document.createElement("div");detail.className="print-history-detail";
+   const rotation=entry.querySelector("strong")?.innerText.replace(/\s+/g," ").trim()||"Rotasyon";
+   const dateNode=entry.querySelector("strong")?.parentElement?.querySelector("div");
+   const date=(dateNode?.innerText||"").replace(/\s+/g," ").trim();
+   const floor=entry.querySelector("small")?.innerText.replace(/\s+/g," ").trim()||"";
+   const name=document.createElement("strong");name.className="print-rotation-name";name.textContent=rotation;detail.appendChild(name);
+   if(date){const el=document.createElement("div");el.className="print-rotation-date";el.textContent=date;detail.appendChild(el);}
+   if(floor){const el=document.createElement("div");el.className="print-rotation-date";el.textContent=floor;detail.appendChild(el);}
+   li.appendChild(detail);list.appendChild(li);
+  });
+  const empty=content.querySelector(".empty");content.innerHTML="";
+  if(list.children.length)content.appendChild(list);else if(empty)content.appendChild(empty);
+ }else if(title.includes("Rotasyon İlerlemesi")){
+  const cards=[...content.querySelectorAll(".progress-item")];
+  const list=document.createElement("ol");list.className="print-progress-list";
+  cards.forEach(card=>{
+   const li=document.createElement("li"),detail=document.createElement("div");detail.className="print-progress-detail";
+   const heading=card.querySelector("h4")?.innerText.replace(/\s+/g," ").trim()||"Rotasyon";
+   const name=document.createElement("strong");name.className="print-rotation-name";name.textContent=heading;detail.appendChild(name);
+   const ratio=card.querySelector(".progress-ratio-inline")?.innerText||"0 / 0";
+   const target=Math.max(0,Math.ceil(Number((ratio.split("/").pop()||"0").trim().replace(",","."))||0));
+   const sourceRows=[...card.querySelectorAll(".period-list li")];
+   const rows=document.createElement("div");rows.className="print-progress-periods";
+   for(let i=1;i<=target;i++){
+    const source=sourceRows.find(row=>(row.querySelector(".period-index")?.textContent||"").replace(/[^\d]/g,"")===String(i));
+    const date=source?[...source.querySelectorAll("span")].filter(span=>!span.classList.contains("period-index")).map(span=>span.textContent.replace(/\s+/g," ").trim()).filter(Boolean).join(" "):"";
+    const row=document.createElement("div");row.className="print-period-row";
+    const number=document.createElement("span");number.className="print-period-number";number.textContent=i+".";
+    const dateText=document.createElement("span");dateText.className="print-period-date";dateText.textContent=date;
+    row.append(number,dateText);rows.appendChild(row);
+   }
+   if(target>0)detail.appendChild(rows);
+   li.appendChild(detail);list.appendChild(li);
+  });
+  content.innerHTML="";if(list.children.length)content.appendChild(list);else content.textContent="Gösterilecek rotasyon bulunmuyor.";
+ }
+ const old=document.getElementById("printReport");if(old)old.remove();
+ const report=document.createElement("section");report.id="printReport";
+ const person=db.people.find(p=>p.name===personName),effectiveStart=startDate||person?.start||"";
+ const startLabel=effectiveStart?new Date(effectiveStart+"T12:00:00").toLocaleDateString("tr-TR"):"";
+ report.innerHTML=`<header class="print-report-header">${personName?`<div class="print-report-person">${esc(String(personName).toLocaleUpperCase("tr-TR"))}</div>`:""}${startLabel?`<div class="print-report-start-date">EĞİTİME BAŞLAMA TARİHİ: ${esc(startLabel)}</div>`:""}</header><main class="print-report-content"></main>`;
+ report.querySelector(".print-report-content").appendChild(content);
+ const pageStyle=document.createElement("style");pageStyle.id="modalPrintPageStyle";
+ pageStyle.textContent=`@media print{@page{size:A4 ${orientation==="landscape"?"landscape":"portrait"};margin:12mm}}`;
+ document.head.appendChild(pageStyle);document.body.appendChild(report);
+ if(fitOnePage){report.style.boxSizing="border-box";report.style.width="190mm";report.style.display="block";report.style.position="absolute";report.style.left="-10000px";report.style.top="0";report.style.visibility="hidden";}
+ const cleanup=()=>{if(report.isConnected)report.remove();if(pageStyle.isConnected)pageStyle.remove();window.removeEventListener("afterprint",cleanup);};
+ window.addEventListener("afterprint",cleanup);
+ const doPrint=()=>{
+  if(fitOnePage){
+   const usableWidth=690,usableHeight=965,w=Math.max(report.scrollWidth,report.getBoundingClientRect().width,1),h=Math.max(report.scrollHeight,report.getBoundingClientRect().height,1);
+   const scale=Math.min(1,usableWidth/w,usableHeight/h);report.style.zoom=String(scale);report.style.width=(190/scale)+"mm";
+   report.style.position="static";report.style.left="auto";report.style.top="auto";report.style.visibility="visible";
+  }
+  window.focus();window.print();
+ };
+ requestAnimationFrame(()=>requestAnimationFrame(doPrint));setTimeout(cleanup,60000);
+}
+function setAssistantProgressMode(pid,mode){
+ const p=db.people.find(x=>x.id===pid);if(!p)return;
+ const chosen=mode==="remaining"?"remaining":"all";
+ const host=document.getElementById("assistantProgressGroups");
+ if(host)host.innerHTML=buildProgressGroups(p,chosen)||'<div class="empty">Kalan rotasyon bulunmuyor.</div>';
+ document.querySelectorAll("#assistantProgressTabs .progress-view-tab").forEach(btn=>btn.classList.toggle("active",btn.dataset.mode===chosen));
+}
+function showProgress(pid){
+ const p=db.people.find(x=>x.id===pid);if(!p)return;
+ const totalTarget=ROTATIONS.reduce((n,r)=>n+Number(p.targetOverrides?.[r]??db.targets[r]??6),0);
+ const totalDone=ROTATIONS.reduce((n,r)=>n+completed(p,r),0);
+ openModal(`${p.name} · Rotasyon İlerlemesi`,`<div class="progress-summary"><div class="progress-pill"><strong>${totalDone.toLocaleString("tr-TR")}</strong><span>tamamlanan</span></div><div class="progress-pill"><strong>${Math.max(0,totalTarget-totalDone).toLocaleString("tr-TR")}</strong><span>kalan</span></div><div class="progress-pill"><strong>${totalTarget.toLocaleString("tr-TR")}</strong><span>hedef</span></div></div><div class="progress-view-tabs" id="assistantProgressTabs"><button class="progress-view-tab active" data-mode="all" onclick="setAssistantProgressMode('${p.id}','all')">Tümü</button><button class="progress-view-tab" data-mode="remaining" onclick="setAssistantProgressMode('${p.id}','remaining')">Sadece Kalanlar</button></div><div class="progress-groups" id="assistantProgressGroups">${buildProgressGroups(p,"all")}</div>`,`<button class="btn" onclick="printModalReport('${esc(p.name)} - Rotasyon İlerlemesi','portrait','${esc(p.name)}',true,'${esc(p.start||"")}')">Yazdır</button><button class="btn primary" onclick="closeModal()">Kapat</button>`);
+ document.getElementById("modal").classList.add("progress-mode");
+}
+function rotationHistoryModal(pid){
+ const p=db.people.find(x=>x.id===pid);if(!p)return;
+ const records=(p.rotations||[]).map(r=>({...r}));
+ const hasMonth=(rotation,year,month)=>records.some(r=>!r.undated&&r.rotation===rotation&&Number(r.year)===Number(year)&&(
+  Number(r.startMonth)===Number(month)||Number(r.endMonth)===Number(month)||(r.months||[]).map(Number).includes(Number(month))||
+  (r.monthIds||[r.monthId].filter(Boolean)).some(mid=>{const linked=(db.months||[]).find(m=>m.id===mid);return linked&&Number(linked.year)===Number(year)&&Number(linked.month)===Number(month)})
+ ));
+ const dated=records.filter(r=>!r.undated&&r.year&&r.startMonth).sort((a,b)=>Number(a.year)-Number(b.year)||Number(a.startMonth)-Number(b.startMonth)||Number(a.endMonth)-Number(b.endMonth)||String(a.rotation).localeCompare(String(b.rotation),"tr"));
+ const undated=records.filter(r=>r.undated);
+ const rows=dated.map((r,i)=>{
+  const months=rotationRecordMonthList(r),contiguous=months.every((month,index)=>index===0||month===months[index-1]+1);
+  const label=months.length>1&&!contiguous?months.map(month=>`${MONTHS[month-1]} ${r.year}`).join(" · "):Number(r.endMonth||r.startMonth)!==Number(r.startMonth)?`${MONTHS[Number(r.startMonth)-1]}–${MONTHS[Number(r.endMonth)-1]} ${r.year}`:`${MONTHS[Number(r.startMonth)-1]} ${r.year}`;
+  return `<div class="historyitem"><div style="display:flex;gap:8px;align-items:flex-start"><div><strong>${esc(r.rotation)}</strong><div>${esc(label)}</div>${r.floor?`<small class="muted">${esc(r.floor)}</small>`:""}</div></div></div>`;
+ }).join("");
+ const undatedRows=undated.map(r=>`<div class="historyitem"><strong>${esc(r.rotation)}</strong> · Tarihsiz dönem</div>`).join("");
+ openModal(`${p.name} · Kronolojik Rotasyon Geçmişi`,(rows||'<div class="empty">Rotasyon geçmişi bulunmuyor.</div>')+(undated.length?`<h4>Tarihsiz kayıtlar</h4>${undatedRows}`:""),`<button class="btn" onclick="printModalReport('${esc(p.name)} - Kronolojik Rotasyon Geçmişi','portrait','${esc(p.name)}',false,'${esc(p.start||"")}')">Yazdır</button><button class="btn primary" onclick="closeModal()">Kapat</button>`);
+}
+function renderRemaining(){
+ const q=(document.getElementById("remainingSearch")?.value||"").trim().toLocaleLowerCase("tr");
+ const people=activePeople().filter(p=>!q||p.name.toLocaleLowerCase("tr").includes(q));
+ remainingList.innerHTML=people.map(p=>{
+  const totalTarget=ROTATIONS.reduce((n,r)=>n+Number(p.targetOverrides?.[r]??db.targets[r]??6),0);
+  const totalDone=ROTATIONS.reduce((n,r)=>n+completed(p,r),0);
+  return `<div class="panel remaining-person-panel"><div class="panelhead"><strong>${esc(p.name)}</strong><div class="row-actions"><button class="btn sm" onclick="profile('${p.id}')">Profili aç</button></div></div><div class="panelbody"><div class="progress-summary"><div class="progress-pill"><strong>${totalDone.toLocaleString("tr-TR")}</strong><span>tamamlanan</span></div><div class="progress-pill"><strong>${Math.max(0,totalTarget-totalDone).toLocaleString("tr-TR")}</strong><span>kalan</span></div><div class="progress-pill"><strong>${totalTarget.toLocaleString("tr-TR")}</strong><span>hedef</span></div></div><div class="progress-groups">${buildProgressGroups(p,remainingViewMode)}</div></div></div>`;
+ }).join("")||(q?'<div class="empty">Bu isimle eşleşen aktif asistan bulunamadı.</div>':'<div class="empty">Gösterilecek kalan rotasyon bulunmuyor.</div>');
+}
+function renderSeniority(){
+ let list=activePeople().map(p=>({p,s:senior(p)})).filter(x=>x.s).sort((a,b)=>b.s.net-a.s.net);
+ seniorityRows.innerHTML=list.map(({p,s})=>{
+  let deducted=(p.deductions||[]).reduce((n,d)=>n+(+d.years*365)+(+d.months*30)+(+d.days),0);
+  return `<tr><td class="person"><div class="seniority-person-name">${esc(p.name)}</div><div class="seniority-deduction-note">${deducted>0?`Kıdemden düşülen: ${fmtDays(deducted)}`:"Kıdem dışı süre yok"}</div></td><td>${fmtDate(p.start)}</td><td>${fmtDays(s.net)}</td><td>${fmtDays(s.remaining)}</td><td>${s.target.toLocaleDateString("tr-TR")}</td></tr>`;
+ }).join("")||'<tr><td colspan="5" class="empty">Başlangıç tarihi bulunan aktif asistan yok.</td></tr>';
+}
+function birthdayParts(value){
+ const match=String(value||"").match(/^(\d{4})-(\d{2})-(\d{2})$/);if(!match)return null;
+ const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]),date=new Date(year,month-1,day,12);
+ if(date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day)return null;
+ return {year,month,day};
+}
+function birthdayDateModal(pid){
+ const person=db.people.find(item=>item.id===pid);if(!person)return;
+ openModal("Doğum tarihini düzenle",`<div class="birthday-edit-person"><span class="birthday-edit-avatar">${esc((person.name||"?").trim().charAt(0).toLocaleUpperCase("tr-TR"))}</span><div><strong>${esc(person.name)}</strong><small>Doğum tarihi</small></div></div><div class="formgrid"><div class="field full"><label>Doğum tarihi</label><input id="birthdayDateValue" type="date" value="${esc(person.birthDate||"")}" max="${new Date().toISOString().slice(0,10)}"></div></div><p class="muted small">Tarih kaydedildiğinde kişi doğum ayının altında otomatik olarak listelenir.</p>`,`<button class="btn" onclick="closeModal()">Vazgeç</button>${person.birthDate?`<button class="btn danger" onclick="saveBirthdayDate('${pid}',true)">Tarihi kaldır</button>`:""}<button class="btn primary" onclick="saveBirthdayDate('${pid}')">Kaydet</button>`);
+}
+function saveBirthdayDate(pid,clear=false){
+ const person=db.people.find(item=>item.id===pid);if(!person)return;
+ const input=document.getElementById("birthdayDateValue"),value=clear?"":String(input?.value||"");
+ if(value&&!birthdayParts(value))return alert("Geçerli bir doğum tarihi seçin.");
+ person.birthDate=value;closeModal();persist(value?"Doğum tarihi güncellendi":"Doğum tarihi kaldırıldı");showPage("birthdays");
+}
+function birthdayPersonRow(person,showDate=true){
+ const parts=birthdayParts(person.birthDate);
+ const birthdayMonthNames=["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+ const dateText=parts?`${parts.day} ${birthdayMonthNames[parts.month-1]}`:"";
+ return `<div class="birthday-person-row" role="button" tabindex="0" aria-label="${esc(person.name)} doğum tarihini düzenle" onclick="birthdayDateModal('${person.id}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();birthdayDateModal('${person.id}')}" title="Doğum tarihini düzenlemek için tıklayın"><span class="birthday-person-name">${esc(person.name)}</span>${showDate&&parts?`<span class="birthday-person-date">${dateText}</span>`:`<span class="birthday-missing-label">Tarih girilmemiş</span>`}<span class="birthday-edit-icon" aria-hidden="true">✎</span></div>`;
+}
+function renderBirthdays(){
+ const host=document.getElementById("birthdayList");if(!host)return;
+ const people=activePeople(),known=people.filter(person=>birthdayParts(person.birthDate)),missing=people.filter(person=>!birthdayParts(person.birthDate));
+ const groups=MONTHS.map((month,index)=>({month,index:index+1,people:known.filter(person=>birthdayParts(person.birthDate).month===index+1).sort((a,b)=>birthdayParts(a.birthDate).day-birthdayParts(b.birthDate).day||a.name.localeCompare(b.name,"tr-TR"))}));
+ const monthCards=groups.map(group=>`<section class="birthday-month-card"><header class="birthday-month-heading"><h3>${group.month.toLocaleUpperCase("tr-TR")}</h3><span>${group.people.length} kişi</span></header><div class="birthday-month-people">${group.people.length?group.people.map(person=>birthdayPersonRow(person,true)).join(""):`<div class="birthday-month-empty">Kayıtlı doğum günü yok.</div>`}</div></section>`).join("");
+ const missingPanel=`<details class="birthday-missing-panel" ${missing.length?"open":""}><summary><span><strong>Doğum tarihi girilmemiş</strong><small>Doğum tarihi henüz eklenmemiş aktif asistanlar</small></span><span class="birthday-missing-count">${missing.length}</span></summary><div class="birthday-missing-list">${missing.length?missing.sort((a,b)=>a.name.localeCompare(b.name,"tr-TR")).map(person=>birthdayPersonRow(person,false)).join(""):`<div class="birthday-month-empty">Bütün aktif asistanların doğum tarihi girilmiş.</div>`}</div></details>`;
+ host.innerHTML=`<div class="birthday-summary"><div><strong>${known.length}</strong><span>Doğum tarihi kayıtlı</span></div><div><strong>${missing.length}</strong><span>Doğum tarihi girilmemiş</span></div><p>Ayları yıl sırasına göre dikey olarak görüntüleyebilirsiniz. Bir isme tıklayarak doğum tarihini ekleyin veya düzenleyin.</p></div><div class="birthday-directory-layout"><div class="birthday-month-grid">${monthCards}</div><aside class="birthday-missing-sidebar">${missingPanel}</aside></div>`;
+}
+function runQuality(){
+ const people=activePeople(),issues=[];
+ const missing=people.filter(p=>!p.start);
+ const undated=people.reduce((n,p)=>n+(p.rotations||[]).filter(x=>x.undated).length,0);
+ const duplicate=[],multi=[];
+ people.forEach(p=>{
+  const map=new Map();
+  (p.rotations||[]).filter(r=>!r.undated&&r.year&&r.startMonth).forEach(r=>{
+   const key=`${r.year}-${r.startMonth}`;if(!map.has(key))map.set(key,[]);map.get(key).push(r.rotation);
+  });
+  map.forEach((types,key)=>{
+   const counts={};types.forEach(t=>counts[t]=(counts[t]||0)+1);
+   if(Object.values(counts).some(n=>n>1))duplicate.push(`${p.name} · ${key}`);
+   if(new Set(types).size>1)multi.push(`${p.name} · ${key}: ${[...new Set(types)].join(", ")}`);
+  });
+ });
+ if(missing.length)issues.push({level:"red",title:"Başlangıç tarihi eksik",text:`${missing.length} aktif asistanda eğitim başlangıç tarihi eksik: ${missing.map(p=>p.name).join(", ")}`});
+ if(undated)issues.push({level:"amber",title:"Tarihsiz dönem kayıtları",text:`${undated} tarihsiz dönem kaydı bulunuyor. Bunlar mevcut kurala göre tamamlanmış dönem sayılır; kaynak belgeyle doğrulanmaları önerilir.`});
+ if(duplicate.length)issues.push({level:"red",title:"Mükerrer olabilecek kayıtlar",text:duplicate.join(" · ")});
+ if(multi.length)issues.push({level:"amber",title:"Aynı ayda birden fazla rotasyon",text:multi.join(" · ")});
+ qualityList.innerHTML=issues.map(x=>`<div class="notice" style="${x.level==="red"?"border-color:#f0c7c4;background:#fff5f4":""}"><strong>${esc(x.title)}</strong><div style="margin-top:4px">${esc(x.text)}</div></div>`).join("")||'<div class="notice">Temel veri kontrollerinde öncelikli sorun bulunmadı.</div>';
+}
+function renderHistory(){history.innerHTML="<h3>Son işlemler</h3>"+(db.history||[]).slice(0,20).map(x=>`<div class="historyitem"><strong>${esc(x.action)}</strong><br><small>${new Date(x.at).toLocaleString("tr-TR")}</small></div>`).join("")}
+function exportableDatabase(){
+ // Eski yerel veride sürüm işareti bulunup canonical kayıt dizisi boşsa
+ // dışa aktarmadan önce kalan legacy geçmişleri tekrar içeri al.
+ const hasLegacyPeople=(db.people||[]).some(p=>Array.isArray(p.rotations)&&p.rotations.length>0);
+ const hasLegacyMonths=(db.months||[]).some(m=>Object.values(m.assignments||{}).some(ids=>Array.isArray(ids)&&ids.length>0));
+ if((!Array.isArray(db.rotationRecords)||(!db.rotationRecords.length&&(hasLegacyPeople||hasLegacyMonths)))&&
+    (hasLegacyPeople||hasLegacyMonths)){
+   delete db.rotationCanonicalVersion;
+   migrateRotationRecords({recoverSnapshots:false});
+ }
+ // Keep the canonical source and also include the exact derived views shown by the UI.
+ syncRotationProjections();
+ const exported=clone(db);
+ const sourceCount=(db.rotationRecords||[]).filter(r=>r.personId).length;
+ const projectionCount=(exported.people||[]).reduce((n,p)=>n+(p.rotations||[]).length,0);
+ if(sourceCount>0&&projectionCount===0)throw new Error("Rotasyon geçmişleri dışa aktarma görünümüne aktarılamadı.");
+ (exported.months||[]).forEach(month=>{
+  const assignments={};
+  (exported.rotationRecords||[]).forEach(rec=>{
+   if(rec.undated||Number(rec.year)!==Number(month.year)||!rotationRecordMonthList(rec).includes(Number(month.month)))return;
+   assignments[rec.rotation]=assignments[rec.rotation]||[];
+   if(!assignments[rec.rotation].includes(rec.personId))assignments[rec.rotation].push(rec.personId);
+  });
+  month.assignments=assignments;
+ });
+ return exported;
+}
+function downloadBlob(blob,filename){
+ const url=URL.createObjectURL(blob),a=document.createElement("a");
+ a.href=url;a.download=filename;a.style.display="none";document.body.appendChild(a);a.click();a.remove();
+ // Do not revoke immediately; some browsers need a short interval to start the download.
+ setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+function backup(){
+ try{
+  const data=exportableDatabase();
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json;charset=utf-8"});
+  downloadBlob(blob,"rotasyon-takip-merkezi-tum-veriler-yedek.json");
+ }catch(err){console.error(err);alert("Yedek oluşturulamadı. Veriler tarayıcıda kalmaya devam ediyor; tekrar deneyin.")}
+}
+function restore(e){let f=e.target.files[0];if(!f)return;let rd=new FileReader();rd.onload=()=>{try{let x=JSON.parse(rd.result);if(!Array.isArray(x.people)||!Array.isArray(x.months))throw 0;if(!confirm("Mevcut veriler seçilen yedekle değiştirilsin mi?"))return;const current=localStorage.getItem(KEY);if(current){const snaps=JSON.parse(localStorage.getItem(KEY+"-snapshots")||"[]");snaps.unshift({at:new Date().toISOString(),data:current});localStorage.setItem(KEY+"-snapshots",JSON.stringify(snaps.slice(0,5)));}db=x;db.rotationRecords=Array.isArray(db.rotationRecords)?db.rotationRecords:undefined;if(db.rotationCanonicalVersion!==1){migrateRotationRecords({recoverSnapshots:false})}normalizeConsecutiveRotationPeriods();syncRotationProjections();localStorage.setItem(KEY,JSON.stringify(persistableDatabase()));if(window.queueCloudSave)window.queueCloudSave();render();alert("Yedek yüklendi ve merkezi eşitleme başlatıldı.")}catch(err){console.error(err);alert("Yedek yüklenemedi. Dosya geçersiz veya migrasyon sırasında hata oluştu.")}e.target.value=""};rd.readAsText(f)}
+// Hover details are scoped to the assistant rotation matrix, with a brief 120 ms delay.
+(function setupMatrixInstantPopup(){
+ const popup=document.createElement("div");
+ popup.id="matrixHoverPopup";
+ popup.innerHTML='<div class="mh-head"><div class="mh-person"></div><div class="mh-rotation"></div></div><div class="mh-body"><div class="mh-count"></div><div class="mh-list"></div></div>';
+ document.body.appendChild(popup);
+ const personEl=popup.querySelector(".mh-person"),rotationEl=popup.querySelector(".mh-rotation"),countEl=popup.querySelector(".mh-count"),listEl=popup.querySelector(".mh-list");
+ let currentCell=null,pendingCell=null,hoverTimer=null;
+ const cancelPending=()=>{
+  if(hoverTimer!==null)clearTimeout(hoverTimer);
+  hoverTimer=null;pendingCell=null;
+ };
+ const position=(cell)=>{
+  const rect=cell.getBoundingClientRect(),margin=10;
+  popup.style.left="0px";popup.style.top="0px";
+  const width=popup.offsetWidth,height=popup.offsetHeight;
+  let left=rect.left+rect.width/2-width/2;
+  left=Math.max(margin,Math.min(window.innerWidth-width-margin,left));
+  let top=rect.top-height-8;
+  if(top<margin)top=Math.min(window.innerHeight-height-margin,rect.bottom+8);
+  popup.style.left=left+"px";popup.style.top=Math.max(margin,top)+"px";
+ };
+ const hide=()=>{currentCell=null;popup.classList.remove("visible")};
+ document.addEventListener("pointerover",event=>{
+  const cell=event.target.closest?.("#dashMatrixRows td.rotation-cell[data-hover-popup]");
+  if(!cell||cell===currentCell||cell===pendingCell)return;
+  cancelPending();
+  pendingCell=cell;
+  hoverTimer=setTimeout(()=>{
+   hoverTimer=null;
+   if(pendingCell!==cell)return;
+   pendingCell=null;
+   if(!cell.isConnected)return;
+   currentCell=cell;
+   const parts=(cell.getAttribute("data-hover-popup")||"").split("\\n");
+   personEl.textContent=parts[0]||"";
+   rotationEl.textContent=parts[1]||"";
+   countEl.textContent=parts[2]||"";
+   listEl.replaceChildren();
+   const entries=parts.slice(3).filter(Boolean);
+   if(entries.length){
+    entries.forEach(label=>{
+     const item=document.createElement("div");item.className="mh-item";
+     const dot=document.createElement("span");dot.className="mh-dot";
+     const text=document.createElement("span");text.textContent=label;
+     item.append(dot,text);listEl.appendChild(item);
+    });
+   }else{
+    const empty=document.createElement("div");empty.className="mh-empty";empty.textContent="Henüz rotasyon kaydı bulunmuyor.";
+    listEl.appendChild(empty);
+   }
+   popup.classList.add("visible");
+   position(cell);
+  },250);
+ },true);
+ document.addEventListener("pointerout",event=>{
+  const related=event.relatedTarget;
+  if(pendingCell&&(event.target===pendingCell||pendingCell.contains(event.target))){
+   if(related&&pendingCell.contains(related))return;
+   cancelPending();
+  }
+  if(!currentCell)return;
+  if(related&&currentCell.contains(related))return;
+  if(event.target===currentCell||currentCell.contains(event.target))hide();
+ },true);
+ document.addEventListener("scroll",()=>{if(currentCell)position(currentCell)},true);
+ window.addEventListener("resize",()=>{if(currentCell)position(currentCell)});
+})();
+
+render();
+// Kıdem hesabı gerçek takvim gününe bağlıdır. Sayfa açık kalsa bile yerel gün değiştiğinde tabloyu yenile.
+let seniorityDateKey=new Date().toLocaleDateString("en-CA");
+function refreshSeniorityForNewDay(){
+ const todayKey=new Date().toLocaleDateString("en-CA");
+ if(todayKey!==seniorityDateKey){
+  seniorityDateKey=todayKey;
+  renderSeniority();
+ }
+}
+setInterval(refreshSeniorityForNewDay,60000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSeniorityForNewDay()});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+(()=>{
+ const SUPABASE_URL='https://wmcvmchgwvkbcrklgpjs.supabase.co';
+ const SUPABASE_PUBLISHABLE_KEY='sb_publishable_yhX31TCX_YKod09Xv-hkSg_WAFf-k1E';
+ const message=document.getElementById('cloudAuthMessage');
+ const gate=document.getElementById('cloudAuthGate');
+ const loginBtn=document.getElementById('cloudLoginBtn');
+ const signupBtn=document.getElementById('cloudSignupBtn');
+ const logoutBtn=document.getElementById('cloudLogoutBtn');
+ const chip=document.getElementById('cloudAccountChip');
+ const emailLabel=document.getElementById('cloudAccountEmail');
+ let client=null,activeUser=null,saveTimer=null,saving=false;
+ const setMessage=(text,type='')=>{message.textContent=text;message.className='cloud-auth-message'+(type?' '+type:'')};
+ const setBusy=(busy)=>{loginBtn.disabled=signupBtn.disabled=busy;loginBtn.textContent=busy?'Bağlanıyor…':'Giriş yap';};
+ const getCredentials=()=>({email:document.getElementById('cloudEmail').value.trim(),password:document.getElementById('cloudPassword').value});
+ async function cloudLoadOrInitialize(user){
+  setMessage('Merkezi kayıtlar kontrol ediliyor…');
+  const {data,error}=await client.from('rotation_app_state').select('data,updated_at').eq('user_id',user.id).maybeSingle();
+  if(error) throw error;
+  if(data&&data.data){
+   db=data.data;
+   db.people=Array.isArray(db.people)?db.people:[];
+   db.months=Array.isArray(db.months)?db.months:[];
+   db.rotationRecords=Array.isArray(db.rotationRecords)?db.rotationRecords:[];
+   if(db.rotationCanonicalVersion!==1){migrateRotationRecords({recoverSnapshots:false});}
+   normalizeConsecutiveRotationPeriods();
+   syncRotationProjections();
+   localStorage.setItem(KEY,JSON.stringify(persistableDatabase()));
+   render();
+   setMessage('Merkezi kayıtlar yüklendi. Son güncelleme: '+new Date(data.updated_at).toLocaleString('tr-TR'),'success');
+  }else{
+   // No cloud record exists yet. Do not upload an empty browser seed; the owner imports the private initial JSON once.
+   syncRotationProjections();
+   localStorage.setItem(KEY,JSON.stringify(persistableDatabase()));
+   render();
+   setMessage('Hesap hazır. İlk veri aktarımı için uygulamada Veri Yönetimi → Yedek Yükle bölümünden size verilen özel JSON dosyasını seçin.','success');
+  }
+  activeUser=user;
+  emailLabel.textContent=user.email||'Hesap';
+  chip.hidden=false;
+  document.body.classList.add('cloud-ready');
+  gate.style.display='none';
+ }
+ window.queueCloudSave=()=>{
+  if(!client||!activeUser)return;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(async()=>{
+   if(saving){saveTimer=setTimeout(()=>window.queueCloudSave(),500);return;}
+   saving=true;
+   try{
+    const data=persistableDatabase();
+    const {error}=await client.from('rotation_app_state').upsert({user_id:activeUser.id,data,updated_at:new Date().toISOString()},{onConflict:'user_id'});
+    if(error) throw error;
+    const indicator=document.getElementById('cloudAccountEmail');
+    if(indicator) indicator.title='Merkezi kayıt eşitlendi · '+new Date().toLocaleTimeString('tr-TR');
+   }catch(error){console.error('Bulut eşitleme hatası:',error);setMessage('Değişiklik yerel olarak kaydedildi ancak merkezi eşitleme başarısız: '+(error.message||'Bağlantı hatası'),'error');}
+   finally{saving=false;}
+  },650);
+ };
+ async function connect(){
+  if(!window.supabase?.createClient){setMessage('Supabase istemcisi yüklenemedi. İnternet bağlantınızı kontrol edin.','error');return;}
+  client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
+  const {data:{session},error}=await client.auth.getSession();
+  if(error)throw error;
+  if(session?.user){await cloudLoadOrInitialize(session.user);}
+ }
+ loginBtn.addEventListener('click',async()=>{
+  const {email,password}=getCredentials();
+  if(!email||!password){setMessage('E-posta ve şifre alanlarını doldurun.','error');return;}
+  try{setBusy(true);if(!client)client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+   const {data,error}=await client.auth.signInWithPassword({email,password});if(error)throw error;
+   await cloudLoadOrInitialize(data.user);
+  }catch(e){setMessage(e.message||'Giriş yapılamadı.','error');}finally{setBusy(false);}
+ });
+ signupBtn.addEventListener('click',async()=>{
+  const {email,password}=getCredentials();
+  if(!email||!password){setMessage('E-posta ve şifre alanlarını doldurun.','error');return;}
+  if(password.length<6){setMessage('Şifre en az 6 karakter olmalı.','error');return;}
+  try{setBusy(true);if(!client)client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+   const {data,error}=await client.auth.signUp({email,password});if(error)throw error;
+   if(data.session&&data.user){await cloudLoadOrInitialize(data.user);}else{setMessage('Hesap oluşturuldu. E-posta adresinize gelen doğrulama bağlantısına tıklayın; ardından bu ekrandan giriş yapın.','success');}
+  }catch(e){setMessage(e.message||'Hesap oluşturulamadı.','error');}finally{setBusy(false);}
+ });
+ logoutBtn.addEventListener('click',async()=>{if(client)await client.auth.signOut();activeUser=null;document.body.classList.remove('cloud-ready');chip.hidden=true;gate.style.display='flex';setMessage('Oturum kapatıldı. Yeniden giriş yapabilirsiniz.');});
+ connect().catch(e=>{console.error(e);setMessage('Supabase bağlantısı kurulamadı: '+(e.message||'Bilinmeyen hata'),'error');});
+})();
+</script>
+</body></html>
