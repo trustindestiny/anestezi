@@ -2404,6 +2404,13 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSen
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (()=>{
+ // Build the account chip explicitly; this element was missing from the published HTML.
+ const accountChip=document.createElement('div');
+ accountChip.id='cloudAccountChip';
+ accountChip.hidden=true;
+ accountChip.style.cssText='position:fixed;top:12px;right:14px;z-index:100000';
+ accountChip.innerHTML='<span id="cloudAccountEmail"></span><button id="cloudLogoutBtn" type="button">Oturumu kapat</button>';
+ document.body.appendChild(accountChip);
  const SUPABASE_URL='https://wmcvmchgwvkbcrklgpjs.supabase.co';
  const SUPABASE_PUBLISHABLE_KEY='sb_publishable_yhX31TCX_YKod09Xv-hkSg_WAFf-k1E';
  const message=document.getElementById('cloudAuthMessage');
