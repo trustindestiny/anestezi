@@ -1182,8 +1182,8 @@ body:not(.cloud-ready)>header,body:not(.cloud-ready)>.shell,body:not(.cloud-read
   <div class="cloud-auth-body">
    <label class="cloud-auth-label" for="cloudEmail">E-posta adresi</label><input class="cloud-auth-input" id="cloudEmail" type="email" autocomplete="username" placeholder="ornek@kurum.com">
    <label class="cloud-auth-label" for="cloudPassword">Şifre</label><input class="cloud-auth-input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="En az 6 karakter">
-   <div class="cloud-auth-actions"><button class="cloud-auth-btn primary" id="cloudLoginBtn" type="button">Giriş yap</button><button class="cloud-auth-btn" id="cloudSignupBtn" type="button">Hesap oluştur</button></div>
-   <div class="cloud-auth-message" id="cloudAuthMessage">İlk kullanımda “Hesap oluştur” seçeneğiyle hesabınızı oluşturun.</div>
+   <div class="cloud-auth-actions"><button class="cloud-auth-btn primary" id="cloudLoginBtn" type="button">Giriş yap</button></div>
+   <div class="cloud-auth-message" id="cloudAuthMessage">Yetkili e-posta adresiniz ve şifrenizle giriş yapın.</div>
   </div>
   <div class="cloud-auth-foot">Verileriniz Supabase üzerinde kullanıcı hesabınıza özel olarak saklanır. Şifreniz bu uygulamada veya GitHub'da tutulmaz.</div>
  </div>
@@ -2409,13 +2409,12 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSen
  const message=document.getElementById('cloudAuthMessage');
  const gate=document.getElementById('cloudAuthGate');
  const loginBtn=document.getElementById('cloudLoginBtn');
- const signupBtn=document.getElementById('cloudSignupBtn');
  const logoutBtn=document.getElementById('cloudLogoutBtn');
  const chip=document.getElementById('cloudAccountChip');
  const emailLabel=document.getElementById('cloudAccountEmail');
  let client=null,activeUser=null,saveTimer=null,saving=false;
  const setMessage=(text,type='')=>{message.textContent=text;message.className='cloud-auth-message'+(type?' '+type:'')};
- const setBusy=(busy)=>{loginBtn.disabled=signupBtn.disabled=busy;loginBtn.textContent=busy?'Bağlanıyor…':'Giriş yap';};
+ const setBusy=(busy)=>{loginBtn.disabled=busy;loginBtn.textContent=busy?'Bağlanıyor…':'Giriş yap';};
  const getCredentials=()=>({email:document.getElementById('cloudEmail').value.trim(),password:document.getElementById('cloudPassword').value});
  async function cloudLoadOrInitialize(user){
   setMessage('Merkezi kayıtlar kontrol ediliyor…');
@@ -2475,15 +2474,6 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSen
    const {data,error}=await client.auth.signInWithPassword({email,password});if(error)throw error;
    await cloudLoadOrInitialize(data.user);
   }catch(e){setMessage(e.message||'Giriş yapılamadı.','error');}finally{setBusy(false);}
- });
- signupBtn.addEventListener('click',async()=>{
-  const {email,password}=getCredentials();
-  if(!email||!password){setMessage('E-posta ve şifre alanlarını doldurun.','error');return;}
-  if(password.length<6){setMessage('Şifre en az 6 karakter olmalı.','error');return;}
-  try{setBusy(true);if(!client)client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
-   const {data,error}=await client.auth.signUp({email,password});if(error)throw error;
-   if(data.session&&data.user){await cloudLoadOrInitialize(data.user);}else{setMessage('Hesap oluşturuldu. E-posta adresinize gelen doğrulama bağlantısına tıklayın; ardından bu ekrandan giriş yapın.','success');}
-  }catch(e){setMessage(e.message||'Hesap oluşturulamadı.','error');}finally{setBusy(false);}
  });
  logoutBtn.addEventListener('click',async()=>{if(client)await client.auth.signOut();activeUser=null;document.body.classList.remove('cloud-ready');chip.hidden=true;gate.style.display='flex';setMessage('Oturum kapatıldı. Yeniden giriş yapabilirsiniz.');});
  connect().catch(e=>{console.error(e);setMessage('Supabase bağlantısı kurulamadı: '+(e.message||'Bilinmeyen hata'),'error');});
