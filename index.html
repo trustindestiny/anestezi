@@ -1185,6 +1185,7 @@ body:not(.cloud-ready)>header,body:not(.cloud-ready)>.shell,body:not(.cloud-read
 <meta name="apple-mobile-web-app-title" content="Rotasyon Merkezi">
 
 <style id="print-zoom-controls-v1">
+.print-action-group{display:inline-flex!important;align-items:center;gap:0;vertical-align:middle;white-space:nowrap;flex:0 0 auto}
 .print-zoom-tools{display:inline-flex!important;align-items:center;gap:3px;margin-left:5px;vertical-align:middle}
 .print-zoom-tools button{display:inline-flex!important;align-items:center;justify-content:center;min-width:27px;height:28px;padding:0 6px!important;border:1px solid #cbd7e5!important;border-radius:6px!important;background:#f7f9fc!important;color:#244b73!important;font-size:12px!important;font-weight:800!important;cursor:pointer}
 .print-zoom-tools .print-zoom-value{min-width:42px;text-align:center;font-size:10px;font-weight:800;color:#52657c}
@@ -2448,7 +2449,11 @@ function restore(e){let f=e.target.files[0];if(!f)return;let rd=new FileReader()
   const minus=tools.children[0],plus=tools.children[2];
   minus.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const next=clamp((scales.get(key)||100)-10);scales.set(key,next);apply(key);});
   plus.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const next=clamp((scales.get(key)||100)+10);scales.set(key,next);apply(key);});
-  button.insertAdjacentElement("afterend",tools);
+  const group=document.createElement("span");
+  group.className="print-action-group";
+  button.parentNode.insertBefore(group,button);
+  group.appendChild(button);
+  group.appendChild(tools);
   apply(key);
  };
  const scan=root=>{
