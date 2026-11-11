@@ -2101,6 +2101,7 @@ function printDashboardReport(){
  report.className="dashboard-print";
  report.innerHTML=`<header class="print-report-header"><div class="print-report-brand">ANESTEZİ VE REANİMASYON</div><h1>Asistan Rotasyon Matrisi</h1><div class="print-report-date">Rapor tarihi: ${new Date().toLocaleDateString("tr-TR")}</div></header><main class="print-report-content"></main><footer class="print-report-footer">Medipol Mega Üniversite Hastanesi · Rotasyon Takip Merkezi</footer>`;
  report.querySelector(".print-report-content").appendChild(content);
+ content.style.zoom=String(window.getPrintZoom?.("page-dashboard")||1);
  document.body.appendChild(report);
  const cleanup=()=>{if(report.isConnected)report.remove();window.removeEventListener("afterprint",cleanup);};
  window.addEventListener("afterprint",cleanup);
