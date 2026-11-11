@@ -639,6 +639,8 @@ main{max-width:none;width:100%;padding:18px 20px;margin:0;}
  #printReport.dashboard-print .dash-progress{margin-bottom:3px!important}
  #printReport.dashboard-print .dash-progress-count{font-size:6px!important}
  #printReport.dashboard-print .dash-progress-track{height:4px!important}
+ #printReport.dashboard-print .dash-segment{background:#e4e9ef!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+ #printReport.dashboard-print .dash-segment.filled{background:#3286c5!important;border-color:#3286c5!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
  #printReport.dashboard-print .assistant-cell{width:10%!important;font-size:7px!important}
  #printReport.dashboard-print .assistant-name{font-size:7px!important;font-weight:800!important}
  #printReport.dashboard-print .overall-progress-label{font-size:5.8px!important}
@@ -1893,7 +1895,7 @@ function printRotationHistoryRange(){
  const uniquePeople=new Set(entries.map(x=>x.p.id||x.p.name)).size;
  const undatedCount=(db.rotationRecords||[]).filter(r=>r.undated||!r.year||!rotationRecordMonthList(r).length).length;
  const old=document.getElementById("printReport");if(old)old.remove();
- const report=document.createElement("section");report.id="printReport";report.className="rotation-history-print-report rotation-history-grouped-report";
+ const report=document.createElement("section");report.id="printReport";report.className="rotation-history-print-report rotation-history-grouped-report";report.style.zoom=String(window.getPrintZoom?.("rotation-history")||1);
  report.innerHTML=`
   <header class="print-report-header rotation-print-report-header">
    <div class="rotation-print-report-brandline"><strong>MEDİPOL MEGA ÜNİVERSİTE HASTANESİ</strong><span>ANESTEZİ VE REANİMASYON</span></div>
@@ -2122,6 +2124,7 @@ function printPageReport(pageName,title,orientation="portrait"){
  const report=document.createElement("section");report.id="printReport";
  report.innerHTML=`<header class="print-report-header"><div class="print-report-brand">ANESTEZİ VE REANİMASYON</div><h1>${esc(title)}</h1><div class="print-report-date">Rapor tarihi: ${new Date().toLocaleDateString("tr-TR")}</div></header><main class="print-report-content"></main><footer class="print-report-footer">Medipol Mega Üniversite Hastanesi · Rotasyon Takip Merkezi</footer>`;
  report.querySelector(".print-report-content").appendChild(content);
+ content.style.zoom=String(window.getPrintZoom?.("page-"+pageName)||1);
  const pageStyle=document.createElement("style");pageStyle.id="modalPrintPageStyle";pageStyle.textContent=`@media print{@page{size:A4 ${orientation==="landscape"?"landscape":"portrait"};margin:12mm}}`;
  document.head.appendChild(pageStyle);document.body.appendChild(report);
  const cleanup=()=>{if(report.isConnected)report.remove();if(pageStyle.isConnected)pageStyle.remove();window.removeEventListener("afterprint",cleanup);};
