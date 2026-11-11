@@ -2180,6 +2180,8 @@ function printModalReport(title,orientation="portrait",personName="",fitOnePage=
  const startLabel=effectiveStart?new Date(effectiveStart+"T12:00:00").toLocaleDateString("tr-TR"):"";
  report.innerHTML=`<header class="print-report-header">${personName?`<div class="print-report-person">${esc(String(personName).toLocaleUpperCase("tr-TR"))}</div>`:""}${startLabel?`<div class="print-report-start-date">EĞİTİME BAŞLAMA TARİHİ: ${esc(startLabel)}</div>`:""}</header><main class="print-report-content"></main>`;
  report.querySelector(".print-report-content").appendChild(content);
+ const userPrintZoom=window.getPrintZoom?.("modal-report")||1;
+ if(!fitOnePage)content.style.zoom=String(userPrintZoom);
  const pageStyle=document.createElement("style");pageStyle.id="modalPrintPageStyle";
  pageStyle.textContent=`@media print{@page{size:A4 ${orientation==="landscape"?"landscape":"portrait"};margin:12mm}}`;
  document.head.appendChild(pageStyle);document.body.appendChild(report);
@@ -2189,7 +2191,7 @@ function printModalReport(title,orientation="portrait",personName="",fitOnePage=
  const doPrint=()=>{
   if(fitOnePage){
    const usableWidth=690,usableHeight=965,w=Math.max(report.scrollWidth,report.getBoundingClientRect().width,1),h=Math.max(report.scrollHeight,report.getBoundingClientRect().height,1);
-   const scale=Math.min(1,usableWidth/w,usableHeight/h);report.style.zoom=String(scale);report.style.width=(190/scale)+"mm";
+   const scale=Math.min(1,usableWidth/w,usableHeight/h)*userPrintZoom;report.style.zoom=String(scale);report.style.width=(190/scale)+"mm";
    report.style.position="static";report.style.left="auto";report.style.top="auto";report.style.visibility="visible";
   }
   window.focus();window.print();
