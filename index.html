@@ -1195,7 +1195,7 @@ body:not(.cloud-ready)>header,body:not(.cloud-ready)>.shell,body:not(.cloud-read
 </head><body>
 <div id="cloudAuthGate" aria-live="polite">
  <div class="cloud-auth-card">
-  <div class="cloud-auth-top"><div class="cloud-auth-mark">R</div><h1>Rotasyon Takip Merkezi</h1><p>Merkezi kayıt sistemine güvenli giriş yapın. Tüm cihazlardan aynı verilere erişebilirsiniz.</p></div>
+  <div class="cloud-auth-top"><img class="cloud-auth-banner" src="./assets/anestezi-reanimasyon-logo.svg" alt="Anestezi ve Reanimasyon – Medipol Mega Üniversite Hastanesi"></div>
   <div class="cloud-auth-body">
    <label class="cloud-auth-label" for="cloudPassword">Şifre</label><input class="cloud-auth-input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Şifrenizi girin">
    <div class="cloud-auth-actions"><button class="cloud-auth-btn primary" id="cloudLoginBtn" type="button">Giriş yap</button></div>
@@ -2632,5 +2632,10 @@ if ('serviceWorker' in navigator) {
   #page-remaining .progress-item{padding:9px!important}
   #page-remaining .period-list li>span:last-child{white-space:normal!important;overflow-wrap:anywhere!important}
 }
+</style>
+<style id="cloud-auth-custom-banner">
+.cloud-auth-top{padding:0!important;background:none!important;line-height:0}
+.cloud-auth-banner{display:block;width:100%;height:auto;aspect-ratio:604/154;object-fit:cover}
+@media(max-width:520px){.cloud-auth-top{padding:0!important}}
 </style>
 </body></html>
