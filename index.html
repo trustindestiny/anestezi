@@ -1195,14 +1195,13 @@ body:not(.cloud-ready)>header,body:not(.cloud-ready)>.shell,body:not(.cloud-read
 </head><body>
 <div id="cloudAuthGate" aria-live="polite">
  <div class="cloud-auth-card">
-  <div class="cloud-auth-top"><div class="cloud-auth-mark">R</div><h1>Rotasyon Takip Merkezi</h1><p>Güvenli merkezi kayıt sistemine giriş yapın. Aynı hesapla tüm cihazlardan aynı verilere erişebilirsiniz.</p></div>
+  <div class="cloud-auth-top"><div class="cloud-auth-mark">R</div><h1>Rotasyon Takip Merkezi</h1><p>Merkezi kayıt sistemine güvenli giriş yapın. Tüm cihazlardan aynı verilere erişebilirsiniz.</p></div>
   <div class="cloud-auth-body">
-   <label class="cloud-auth-label" for="cloudEmail">E-posta adresi</label><input class="cloud-auth-input" id="cloudEmail" type="email" autocomplete="username" placeholder="ornek@kurum.com">
-   <label class="cloud-auth-label" for="cloudPassword">Şifre</label><input class="cloud-auth-input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="En az 6 karakter">
+   <label class="cloud-auth-label" for="cloudPassword">Şifre</label><input class="cloud-auth-input" id="cloudPassword" type="password" autocomplete="current-password" placeholder="Şifrenizi girin">
    <div class="cloud-auth-actions"><button class="cloud-auth-btn primary" id="cloudLoginBtn" type="button">Giriş yap</button></div>
-   <div class="cloud-auth-message" id="cloudAuthMessage">Yetkili e-posta adresiniz ve şifrenizle giriş yapın.</div>
+   <div class="cloud-auth-message" id="cloudAuthMessage">Devam etmek için ortak giriş şifresini girin.</div>
   </div>
-  <div class="cloud-auth-foot">Verileriniz Supabase üzerinde kullanıcı hesabınıza özel olarak saklanır. Şifreniz bu uygulamada veya GitHub'da tutulmaz.</div>
+  <div class="cloud-auth-foot">Merkezi kayıtlarınız Supabase üzerinde korunur. Giriş doğrulaması güvenli sunucu üzerinden yapılır.</div>
  </div>
 </div>
 
@@ -2499,7 +2498,7 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSen
  let client=null,activeUser=null,saveTimer=null,saving=false;
  const setMessage=(text,type='')=>{message.textContent=text;message.className='cloud-auth-message'+(type?' '+type:'')};
  const setBusy=(busy)=>{loginBtn.disabled=busy;loginBtn.textContent=busy?'Bağlanıyor…':'Giriş yap';};
- const getCredentials=()=>({email:document.getElementById('cloudEmail').value.trim(),password:document.getElementById('cloudPassword').value});
+ const getCredentials=()=>({password:document.getElementById('cloudPassword').value});
  async function cloudLoadOrInitialize(user){
   setMessage('Merkezi kayıtlar kontrol ediliyor…');
   const {data,error}=await client.from('rotation_app_state').select('data,updated_at').eq('user_id',user.id).maybeSingle();
@@ -2552,11 +2551,18 @@ document.addEventListener("visibilitychange",()=>{if(!document.hidden)refreshSen
   if(session?.user){await cloudLoadOrInitialize(session.user);}
  }
  loginBtn.addEventListener('click',async()=>{
-  const {email,password}=getCredentials();
-  if(!email||!password){setMessage('E-posta ve şifre alanlarını doldurun.','error');return;}
-  try{setBusy(true);if(!client)client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
-   const {data,error}=await client.auth.signInWithPassword({email,password});if(error)throw error;
+  const {password}=getCredentials();
+  if(!password){setMessage('Lütfen şifreyi girin.','error');return;}
+  try{
+   setBusy(true);
+   if(!client)client=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true}});
+   const {data:challenge,error:challengeError}=await client.functions.invoke('shared-password-login',{body:{password}});
+   if(challengeError)throw challengeError;
+   if(!challenge?.token_hash)throw new Error(challenge?.error||'Giriş doğrulanamadı.');
+   const {data,error}=await client.auth.verifyOtp({token_hash:challenge.token_hash,type:'magiclink'});
+   if(error)throw error;
    await cloudLoadOrInitialize(data.user);
+   document.getElementById('cloudPassword').value='';
   }catch(e){setMessage(e.message||'Giriş yapılamadı.','error');}finally{setBusy(false);}
  });
  logoutBtn.addEventListener('click',async()=>{if(client)await client.auth.signOut();activeUser=null;document.body.classList.remove('cloud-ready');chip.hidden=true;gate.style.display='flex';setMessage('Oturum kapatıldı. Yeniden giriş yapabilirsiniz.');});
