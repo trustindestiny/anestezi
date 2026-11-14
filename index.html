@@ -2576,4 +2576,61 @@ if ('serviceWorker' in navigator) {
  });
 }
 </script>
+<style id="remaining-rotations-date-readability-v2">
+/* Kalan Rotasyonlar: tarihlerin rahat okunması için daha geniş yatay yerleşim */
+#page-remaining .progress-groups{
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  gap:12px!important;
+}
+#page-remaining .progress-group-items{
+  grid-template-columns:repeat(2,minmax(0,1fr))!important;
+  gap:8px!important;
+  padding:9px!important;
+}
+#page-remaining .progress-item{
+  min-width:0!important;
+  padding:10px 11px!important;
+}
+#page-remaining .progress-item-head h4{
+  font-size:12px!important;
+  line-height:1.35!important;
+}
+#page-remaining .progress-ratio-inline{
+  font-size:11px!important;
+  white-space:nowrap!important;
+}
+#page-remaining .period-list{
+  gap:7px!important;
+  margin-top:9px!important;
+}
+#page-remaining .period-list li{
+  align-items:center!important;
+  gap:8px!important;
+  min-width:0!important;
+  font-size:11px!important;
+  line-height:1.4!important;
+}
+#page-remaining .period-list li>span:last-child{
+  display:block!important;
+  min-width:0!important;
+  white-space:nowrap!important;
+  overflow:visible!important;
+  text-overflow:clip!important;
+  font-variant-numeric:tabular-nums!important;
+  letter-spacing:.05px!important;
+}
+#page-remaining .period-index{
+  flex:0 0 25px!important;
+  min-width:25px!important;
+}
+@media(max-width:1100px){
+  #page-remaining .progress-groups{grid-template-columns:1fr!important}
+  #page-remaining .progress-group-items{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+}
+@media(max-width:620px){
+  #page-remaining .progress-group-items{grid-template-columns:1fr!important}
+  #page-remaining .progress-item{padding:9px!important}
+  #page-remaining .period-list li>span:last-child{white-space:normal!important;overflow-wrap:anywhere!important}
+}
+</style>
 </body></html>
