@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="604" height="154" viewBox="0 0 604 154">
+<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#17365d"/><stop offset="1" stop-color="#28598a"/></linearGradient></defs>
+<rect width="604" height="154" fill="url(#bg)"/>
+<text x="48" y="76" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="43" font-weight="700" letter-spacing="-1.1">Anestezi ve Reanimasyon</text>
+<text x="48" y="124" fill="#dce8f5" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="400">Medipol Mega Üniversite Hastanesi</text>
+</svg>
